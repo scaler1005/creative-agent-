@@ -24,7 +24,7 @@ export async function getAllStores(): Promise<Record<string, unknown>[]> {
 
   const stores = await Promise.all(
     blobs.map(async (blob) => {
-      const res = await fetch(blob.url);
+      const res = await fetch(blob.downloadUrl);
       return res.json();
     })
   );
@@ -44,7 +44,7 @@ export async function getStore(storeId: string): Promise<Record<string, unknown>
   const { blobs } = await list({ prefix: `${BLOB_PREFIX}${storeId}.json` });
   if (blobs.length === 0) return null;
 
-  const res = await fetch(blobs[0].url);
+  const res = await fetch(blobs[0].downloadUrl);
   return res.json();
 }
 
@@ -60,7 +60,7 @@ export async function saveStore(storeId: string, data: Record<string, unknown>):
   }
 
   await put(`${BLOB_PREFIX}${storeId}.json`, JSON.stringify(data, null, 2), {
-    access: "public",
+    access: "private",
     contentType: "application/json",
   });
 }
@@ -79,7 +79,7 @@ export async function seedFromLocal(): Promise<number> {
     }
 
     await put(`${BLOB_PREFIX}${f}`, raw, {
-      access: "public",
+      access: "private",
       contentType: "application/json",
     });
   }

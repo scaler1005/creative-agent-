@@ -6,7 +6,7 @@ const STORES_DIR = path.join(process.cwd(), "stores");
 const BLOB_PREFIX = "stores/";
 
 function isVercel(): boolean {
-  return !!process.env.BLOB_READ_WRITE_TOKEN;
+  return !!process.env.BLOB_READ_WRITE_TOKEN || !!process.env.BLOB_STORE_ID;
 }
 
 export async function getAllStores(): Promise<Record<string, unknown>[]> {

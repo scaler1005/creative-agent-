@@ -32,11 +32,12 @@ export async function GET(req: Request) {
 
     if (mode === "generate") {
       const jobSet = await client.generate(
-        "/v1/text2image",
+        "/v1/text2image/soul",
         {
           prompt: "A titanium cooking pan on a white background, product photography",
-          aspect_ratio: "1:1",
-          num_images: 1,
+          width_and_height: "1536x1536",
+          quality: "1080p",
+          batch_size: 1,
         },
         { withPolling: true }
       );

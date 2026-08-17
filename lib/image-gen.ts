@@ -6,6 +6,11 @@ interface GeneratedImage {
   conceptIndex: number;
 }
 
+const SIZE_MAP: Record<string, string> = {
+  "1:1": "1536x1536",
+  "9:16": "1152x2048",
+};
+
 export async function generateImages(
   prompts: Array<{ prompt: string; conceptIndex: number }>,
   format: string,
@@ -25,40 +30,36 @@ export async function generateImages(
     maxPollTime: 120000,
   });
 
-  const aspectRatio = format === "9:16" ? "9:16" : "1:1";
+  const widthAndHeight = SIZE_MAP[format] || "1536x1536";
   const results: GeneratedImage[] = [];
 
-  // Generate in batches of 3 to avoid rate limits
   const batchSize = 3;
   for (let i = 0; i < prompts.length; i += batchSize) {
     const batch = prompts.slice(i, i + batchSize);
 
     const batchResults = await Promise.allSettled(
       batch.map(async ({ prompt, conceptIndex }) => {
-        try {
-          const jobSet = await client.generate(
-            "soul/standard",
-            {
-              prompt,
-              aspect_ratio: aspectRatio,
-              num_images: 1,
-            },
-            { withPolling: true }
-          );
+        const jobSet = await client.generate(
+          "/v1/text2image/soul",
+          {
+            prompt,
+            width_and_height: widthAndHeight,
+            quality: "1080p",
+            batch_size: 1,
+          },
+          { withPolling: true }
+        );
 
-          for (const job of jobSet.jobs) {
-            if (job.status === "completed" && job.results?.raw?.url) {
-              return {
-                url: job.results.raw.url,
-                prompt,
-                conceptIndex,
-              };
-            }
+        for (const job of jobSet.jobs) {
+          if (job.status === "completed" && job.results?.raw?.url) {
+            return {
+              url: job.results.raw.url,
+              prompt,
+              conceptIndex,
+            };
           }
-          return null;
-        } catch {
-          return null;
         }
+        return null;
       })
     );
 

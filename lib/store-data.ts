@@ -1,4 +1,4 @@
-import { list, put, del, get } from "@vercel/blob";
+import { list, put, del, head } from "@vercel/blob";
 import { readdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 
@@ -10,18 +10,10 @@ function isVercel(): boolean {
 }
 
 async function readBlob(url: string): Promise<Record<string, unknown>> {
-  const result = await get(url, { access: "private" });
-  if (!result || !result.stream) throw new Error(`Blob not found: ${url}`);
-  const reader = result.stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let done = false;
-  while (!done) {
-    const r = await reader.read();
-    if (r.value) chunks.push(r.value);
-    done = r.done;
-  }
-  const text = new TextDecoder().decode(Buffer.concat(chunks));
-  return JSON.parse(text);
+  const meta = await head(url);
+  const res = await fetch(meta.downloadUrl);
+  if (!res.ok) throw new Error(`Failed to fetch blob: ${res.status}`);
+  return res.json();
 }
 
 export async function getAllStores(): Promise<Record<string, unknown>[]> {

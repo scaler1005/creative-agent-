@@ -1,59 +1,57 @@
-import { createHiggsfieldClient } from "@higgsfield/client/v2";
 import { NextResponse } from "next/server";
 
-export async function GET(req: Request) {
+export async function GET() {
   const apiKey = process.env.HIGGSFIELD_API_KEY;
   const apiSecret = process.env.HIGGSFIELD_API_SECRET;
 
   if (!apiKey || !apiSecret) {
-    return NextResponse.json({
-      error: "Missing HIGGSFIELD_API_KEY or HIGGSFIELD_API_SECRET",
-      hasKey: !!apiKey,
-      hasSecret: !!apiSecret,
-    });
+    return NextResponse.json({ error: "Missing keys" });
   }
 
-  const { searchParams } = new URL(req.url);
-  const mode = searchParams.get("mode") || "generate";
-
   try {
-    const client = createHiggsfieldClient({
-      credentials: `${apiKey}:${apiSecret}`,
-      pollInterval: 3000,
-      maxPollTime: 60000,
+    // Step 1: Submit job with v2 auth + v1 body format
+    const submitRes = await fetch("https://platform.higgsfield.ai/v1/text2image/soul", {
+      method: "POST",
+      headers: {
+        Authorization: `Key ${apiKey}:${apiSecret}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        params: {
+          prompt: "A titanium cooking pan on a white background, product photography",
+          width_and_height: "1536x1536",
+          quality: "1080p",
+          batch_size: 1,
+        },
+      }),
     });
 
-    const endpoint = searchParams.get("endpoint") || "flux-pro/kontext/max/text-to-image";
-
-    if (mode === "generate") {
-      const response = await client.subscribe(
-        endpoint,
-        {
-          input: {
-            prompt: "A titanium cooking pan on a white background, product photography",
-            aspect_ratio: "1:1",
-            safety_tolerance: 2,
-          },
-          withPolling: true,
-        }
-      );
-
-      return NextResponse.json({
-        success: true,
-        status: response.status,
-        requestId: response.request_id,
-        images: response.images,
-      });
+    const submitData = await submitRes.json();
+    if (!submitRes.ok) {
+      return NextResponse.json({ error: "Submit failed", status: submitRes.status, data: submitData });
     }
 
-    return NextResponse.json({ error: "Use ?mode=generate" });
+    const requestId = submitData.request_id || submitData.id;
+
+    // Step 2: Poll for completion
+    const start = Date.now();
+    while (Date.now() - start < 60000) {
+      const pollRes = await fetch(
+        `https://platform.higgsfield.ai/requests/${requestId}/status`,
+        { headers: { Authorization: `Key ${apiKey}:${apiSecret}` } }
+      );
+      if (pollRes.ok) {
+        const pollData = await pollRes.json();
+        if (pollData.status === "completed" || pollData.status === "failed" || pollData.status === "nsfw") {
+          return NextResponse.json({ success: true, result: pollData });
+        }
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+
+    return NextResponse.json({ error: "Timeout waiting for result" });
   } catch (err: unknown) {
-    const error = err as Error & { response?: { status?: number; data?: unknown } };
-    return NextResponse.json({
-      error: error.message,
-      name: error.name,
-      responseStatus: error.response?.status,
-      responseData: error.response?.data,
-    });
+    const error = err as Error;
+    return NextResponse.json({ error: error.message, name: error.name });
   }
 }

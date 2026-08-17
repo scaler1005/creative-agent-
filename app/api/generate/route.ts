@@ -1,6 +1,8 @@
-import { scrapeProductPage, ProductInfo, StoreOffer } from "@/lib/scraper";
+import { scrapeProductPage } from "@/lib/scraper";
 import { writeJob, writeJobStatus } from "@/lib/job-data";
 import { getAllStores } from "@/lib/store-data";
+import { generateCreativeConcepts } from "@/lib/ai-prompts";
+import { generateImages, isImageGenConfigured } from "@/lib/image-gen";
 
 function sendEvent(
   controller: ReadableStreamDefaultController,
@@ -10,91 +12,6 @@ function sendEvent(
   controller.enqueue(
     new TextEncoder().encode(`data: ${JSON.stringify({ event, data })}\n\n`)
   );
-}
-
-interface Concept {
-  concept: string;
-  description: string;
-  prompt: string;
-  reference_product_index: number;
-}
-
-function generateConcepts(
-  products: ProductInfo[],
-  storeOffer: StoreOffer,
-  funnelStage: string,
-  creativeType: string[],
-  format: string,
-  storeLearnings?: { winningPatterns: string[]; angles: string[]; offers: string[] },
-  context?: string
-): Concept[] {
-  const concepts: Concept[] = [];
-  const isRaw = creativeType.includes("raw");
-  const formatLabel = format === "9:16" ? "vertical (story)" : "square (feed)";
-
-  const angles: string[] = [];
-
-  if (funnelStage === "BOF") {
-    angles.push("direct response", "urgency", "social proof", "price anchor");
-  } else if (funnelStage === "MOF") {
-    angles.push("benefits", "comparison", "lifestyle", "trust");
-  } else {
-    angles.push("problem-solution", "curiosity", "education", "brand story");
-  }
-
-  if (storeOffer.isFree) {
-    angles.unshift("free offer");
-  } else if (storeOffer.isClosingSale) {
-    angles.unshift("closing sale urgency");
-  }
-
-  if (storeLearnings?.angles?.length) {
-    angles.unshift(...storeLearnings.angles.slice(0, 3));
-  }
-
-  const usedAngles = angles.slice(0, 10);
-
-  for (let i = 0; i < Math.min(10, products.length * usedAngles.length); i++) {
-    const productIdx = i % products.length;
-    const angleIdx = i % usedAngles.length;
-    const product = products[productIdx];
-    const angle = usedAngles[angleIdx];
-
-    let description = "";
-    let prompt = "";
-
-    if (isRaw) {
-      description = `${formatLabel} raw-style foto van ${product.name}. Angle: ${angle}.`;
-      prompt = `iPhone-kwaliteit foto, ${product.name}, ${angle} angle, natuurlijk licht, geen tekst overlay, authentiek gevoel, ${format} formaat`;
-    } else {
-      description = `${formatLabel} text creative voor ${product.name}. Angle: ${angle}.`;
-      prompt = `Tekst-overlay creative, ${product.name}${product.price ? ` (${product.price})` : ""}, ${angle}, ${storeOffer.offer || "shop now"}, bold typografie, ${format} formaat`;
-    }
-
-    if (storeOffer.offer) {
-      description += ` Offer: ${storeOffer.offer}`;
-    }
-
-    if (context) {
-      description += ` Context: ${context}`;
-      prompt += `, ${context}`;
-    }
-
-    if (storeLearnings?.winningPatterns?.length) {
-      prompt += `. Bewezen patronen: ${storeLearnings.winningPatterns.slice(0, 2).join(", ")}`;
-    }
-
-    concepts.push({
-      concept: `${angle.charAt(0).toUpperCase() + angle.slice(1)} — ${product.name}`,
-      description,
-      prompt,
-      reference_product_index: productIdx,
-    });
-
-    if (concepts.length >= 10) break;
-  }
-
-  return concepts;
 }
 
 export async function POST(req: Request) {
@@ -107,8 +24,8 @@ export async function POST(req: Request) {
       const jobId = Date.now().toString();
 
       try {
-        sendEvent(controller, "status", "Producten ophalen...");
-
+        // Step 1: Scrape products
+        sendEvent(controller, "status", "Producten ophalen van de store...");
         const { products, storeName, storeOffer } = await scrapeProductPage(productUrl);
 
         if (products.length === 0) {
@@ -131,7 +48,7 @@ export async function POST(req: Request) {
         events.push({ event: "products", data: productsData });
 
         // Save job
-        const job = {
+        await writeJob(jobId, {
           id: jobId,
           storeName,
           productUrl,
@@ -142,17 +59,17 @@ export async function POST(req: Request) {
           storeOffer,
           products: selectedProducts,
           createdAt: new Date().toISOString(),
-        };
-        await writeJob(jobId, job);
+        });
 
-        // Load store learnings
-        sendEvent(controller, "status", "Store data laden...");
+        // Step 2: Load store learnings
+        sendEvent(controller, "status", "Store learnings laden...");
         let storeLearnings: { winningPatterns: string[]; angles: string[]; offers: string[] } | undefined;
         try {
           const stores = await getAllStores();
           const matchedStore = stores.find(
-            (s) => (s.name as string)?.toLowerCase().includes(storeName.toLowerCase().split(" ")[0])
-              || (s.url as string)?.includes(new URL(productUrl).hostname)
+            (s) =>
+              (s.name as string)?.toLowerCase().includes(storeName.toLowerCase().split(" ")[0]) ||
+              (s.url as string)?.includes(new URL(productUrl).hostname)
           );
           if (matchedStore?.learnings) {
             const l = matchedStore.learnings as { winningPatterns?: string[]; angles?: string[]; offers?: string[] };
@@ -161,12 +78,15 @@ export async function POST(req: Request) {
               angles: l.angles || [],
               offers: l.offers || [],
             };
+            if (storeLearnings.winningPatterns.length > 0 || storeLearnings.angles.length > 0) {
+              sendEvent(controller, "status", `${storeLearnings.winningPatterns.length} patronen + ${storeLearnings.angles.length} angles gevonden`);
+            }
           }
         } catch {}
 
-        // Generate concepts
-        sendEvent(controller, "status", "Creative concepts genereren...");
-        const concepts = generateConcepts(
+        // Step 3: Generate creative concepts with AI
+        sendEvent(controller, "status", "Creative concepts genereren met AI...");
+        const concepts = await generateCreativeConcepts(
           selectedProducts,
           storeOffer,
           funnelStage || "BOF",
@@ -178,23 +98,63 @@ export async function POST(req: Request) {
 
         sendEvent(controller, "concepts", concepts);
         events.push({ event: "concepts", data: concepts });
+        sendEvent(controller, "status", `${concepts.length} concepts gegenereerd`);
 
-        // Collect product images as creatives
-        sendEvent(controller, "status", "Product images verzamelen...");
-        const imageUrls = selectedProducts
-          .map((p) => p.imageUrl)
-          .filter(Boolean);
+        // Step 4: Generate images with Higgsfield
+        let imageUrls: string[] = [];
 
-        if (imageUrls.length > 0) {
-          sendEvent(controller, "images", imageUrls);
-          events.push({ event: "images", data: imageUrls });
+        if (isImageGenConfigured()) {
+          sendEvent(controller, "status", "Images genereren met Higgsfield AI...");
+
+          const prompts = concepts.map((c, i) => ({
+            prompt: c.prompt,
+            conceptIndex: i,
+          }));
+
+          const generated = await generateImages(prompts, format || "1:1", (completed, total) => {
+            sendEvent(controller, "status", `Images genereren: ${completed}/${total}...`);
+          });
+
+          imageUrls = generated.map((g) => g.url);
+
+          if (imageUrls.length > 0) {
+            sendEvent(controller, "images", imageUrls);
+            events.push({ event: "images", data: imageUrls });
+          } else {
+            sendEvent(controller, "status", "Higgsfield images konden niet gegenereerd worden — product images als fallback");
+            imageUrls = selectedProducts.map((p) => p.imageUrl).filter(Boolean);
+            if (imageUrls.length > 0) {
+              sendEvent(controller, "images", imageUrls);
+              events.push({ event: "images", data: imageUrls });
+            }
+          }
+        } else {
+          // No Higgsfield configured — use product images
+          sendEvent(controller, "status", "⚠ Higgsfield niet geconfigureerd — product images als placeholder");
+          imageUrls = selectedProducts.map((p) => p.imageUrl).filter(Boolean);
+          if (imageUrls.length > 0) {
+            sendEvent(controller, "images", imageUrls);
+            events.push({ event: "images", data: imageUrls });
+          }
         }
 
-        // Done
+        // Step 5: Done
+        const missingKeys: string[] = [];
+        if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY === "sk-ant-...") {
+          missingKeys.push("ANTHROPIC_API_KEY");
+        }
+        if (!isImageGenConfigured()) {
+          missingKeys.push("HIGGSFIELD_API_KEY + HIGGSFIELD_API_SECRET");
+        }
+
+        const note = missingKeys.length > 0
+          ? `${concepts.length} concepts + ${imageUrls.length} images. ⚠ Ontbrekende API keys: ${missingKeys.join(", ")}. Voeg deze toe in Vercel → Settings → Environment Variables voor volledige automation.`
+          : `${concepts.length} concepts + ${imageUrls.length} AI-generated images.`;
+
         const doneData = {
           imageCount: imageUrls.length,
           storeName,
-          note: `${concepts.length} concepts + ${imageUrls.length} product images. Gebruik de concepts als briefing voor je Canva designs.`,
+          note,
         };
         sendEvent(controller, "done", doneData);
         events.push({ event: "done", data: doneData });

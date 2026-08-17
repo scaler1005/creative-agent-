@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
+    "@higgsfield/client": "^0.2.1",
     "@vercel/blob": "^2.8.0",
     "next": "^15.3.0",
     "react": "^19.0.0",

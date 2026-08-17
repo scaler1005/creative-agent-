@@ -1,0 +1,129 @@
+{
+  "id": "ashford-and-sons",
+  "name": "Ashford & Sons",
+  "url": "https://ashford-and-sons.com/",
+  "niche": "",
+  "adAccount": {
+    "platform": "meta",
+    "lastImport": "2026-08-16",
+    "reportingPeriod": { "start": "2026-08-12", "end": "2026-08-16" },
+    "totalSpend": 721.75,
+    "totalPurchases": 21,
+    "campaigns": [
+      {
+        "name": "CBO | AD > COL | 13-08",
+        "status": "active",
+        "spend": 397.26,
+        "purchases": 10,
+        "cpa": 39.73,
+        "roas": 0.82,
+        "ctr": 7.18,
+        "cpc": 0.76,
+        "cpm": 49.74,
+        "addToCart": 252,
+        "profitable": false
+      },
+      {
+        "name": "CBO | 5 REASONS WHY | 14-08",
+        "status": "active",
+        "spend": 324.49,
+        "purchases": 11,
+        "cpa": 29.50,
+        "roas": 0.98,
+        "ctr": 13.53,
+        "cpc": 0.55,
+        "cpm": 67.71,
+        "addToCart": 281,
+        "profitable": false
+      }
+    ],
+    "ads": [
+      {
+        "name": "AD 8",
+        "campaign": "CBO | AD > COL | 13-08",
+        "status": "active",
+        "spend": 227.33,
+        "purchases": 9,
+        "cpa": 25.26,
+        "roas": 1.32,
+        "ctr": 9.72,
+        "cpc": 0.66,
+        "addToCart": 163,
+        "winner": true
+      },
+      {
+        "name": "AD 6",
+        "campaign": "CBO | AD > COL | 13-08",
+        "status": "active",
+        "spend": 62.95,
+        "purchases": 1,
+        "cpa": 62.95,
+        "roas": 0.40,
+        "ctr": 3.05,
+        "cpc": 0.93,
+        "addToCart": 34,
+        "winner": false
+      },
+      {
+        "name": "AD 3",
+        "campaign": "CBO | AD > COL | 13-08",
+        "status": "active",
+        "spend": 29.33,
+        "purchases": 1,
+        "cpa": 29.33,
+        "roas": 0.85,
+        "ctr": 8.57,
+        "cpc": 0.75,
+        "addToCart": 22,
+        "winner": false
+      },
+      {
+        "name": "AD 2",
+        "campaign": "CBO | 5 REASONS WHY | 14-08",
+        "status": "active",
+        "spend": 272.09,
+        "purchases": 10,
+        "cpa": 27.21,
+        "roas": 1.06,
+        "ctr": 13.64,
+        "cpc": 0.51,
+        "addToCart": 260,
+        "winner": true
+      },
+      {
+        "name": "AD 8",
+        "campaign": "CBO | 5 REASONS WHY | 14-08",
+        "status": "active",
+        "spend": 11.73,
+        "purchases": 1,
+        "cpa": 11.73,
+        "roas": 2.55,
+        "ctr": 10.78,
+        "cpc": 0.84,
+        "addToCart": 5,
+        "winner": true
+      }
+    ]
+  },
+  "visualPatterns": [
+    "5 REASONS WHY listicle format — text-heavy, educatief",
+    "AD>COL product collection grid",
+    "Hoge CTR bij text-overlay op productfoto stijl"
+  ],
+  "learnings": {
+    "winningPatterns": [
+      "AD 8 (AD>COL) = top performer: 9 purchases, $25 CPA, 1.32x ROAS, 163 ATC — de enige echt winstgevende creative",
+      "AD 2 (5 REASONS WHY) = volume king: 10 purchases, 13.64% CTR, 260 ATC, $0.51 CPC — pakt massaal aandacht",
+      "AD 8 (5 REASONS WHY) = kleine maar beste ROAS: 2.55x bij $11.73 spend — test met meer budget",
+      "Extreem hoge ATC rates maar lage ROAS — AOV/pricing probleem, niet creatief",
+      "5 REASONS WHY ads hebben consistent hogere CTR (10-14%) vs AD>COL (3-10%)"
+    ],
+    "angles": [
+      "5 Reasons Why — educatief/listicle format (hoogste CTR)",
+      "AD > COL — product collection ads (meeste conversies per ad)"
+    ],
+    "prompts": [],
+    "offers": [],
+    "notes": "Pas 4 dagen data (12-16 aug). Veel adds to cart maar lage ROAS — check pricing/checkout. AD 8 en AD 2 zijn de creatives om te repliceren. Niche nog niet ingevuld."
+  }
+}

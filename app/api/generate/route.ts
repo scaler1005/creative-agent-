@@ -1,8 +1,5 @@
 import { scrapeProductPage } from "@/lib/scraper";
-import { writeFileSync, readFileSync, existsSync } from "fs";
-import { join } from "path";
-
-const JOBS_DIR = join(process.cwd(), "jobs");
+import { writeJob, writeJobStatus, readJobStatus } from "@/lib/job-data";
 
 function sendEvent(
   controller: ReadableStreamDefaultController,
@@ -21,7 +18,6 @@ export async function POST(req: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        // Step 1: Scrape products
         sendEvent(controller, "status", "Producten ophalen...");
         const { products, storeName, storeOffer } = await scrapeProductPage(productUrl);
 
@@ -42,10 +38,7 @@ export async function POST(req: Request) {
           })),
         });
 
-        // Step 2: Write job file for Claude Code MCP processing
         const jobId = Date.now().toString();
-        const jobFile = join(JOBS_DIR, `${jobId}.json`);
-        const statusFile = join(JOBS_DIR, `${jobId}-status.json`);
 
         const job = {
           id: jobId,
@@ -60,43 +53,32 @@ export async function POST(req: Request) {
           createdAt: new Date().toISOString(),
         };
 
-        writeFileSync(jobFile, JSON.stringify(job, null, 2));
-        writeFileSync(
-          statusFile,
-          JSON.stringify({ status: "pending", events: [] })
-        );
+        await writeJob(jobId, job);
+        await writeJobStatus(jobId, { status: "pending", events: [] });
 
-        sendEvent(controller, "status", "Wachten op MCP verwerking...");
+        sendEvent(controller, "status", "Job aangemaakt — wachten op verwerking...");
         sendEvent(controller, "job", { jobId });
 
-        // Poll for status updates from Claude Code MCP processing
         let lastEventCount = 0;
-        const maxWait = 300000; // 5 minutes
+        const maxWait = 300000;
         const start = Date.now();
 
         while (Date.now() - start < maxWait) {
-          await new Promise((r) => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 3000));
 
-          if (!existsSync(statusFile)) continue;
+          const status = await readJobStatus(jobId);
+          if (!status) continue;
 
-          try {
-            const raw = readFileSync(statusFile, "utf-8");
-            const status = JSON.parse(raw);
-
-            // Send any new events
-            if (status.events && status.events.length > lastEventCount) {
-              for (let i = lastEventCount; i < status.events.length; i++) {
-                const evt = status.events[i];
-                sendEvent(controller, evt.event, evt.data);
-              }
-              lastEventCount = status.events.length;
+          const events = (status.events as Array<{ event: string; data: unknown }>) || [];
+          if (events.length > lastEventCount) {
+            for (let i = lastEventCount; i < events.length; i++) {
+              sendEvent(controller, events[i].event, events[i].data);
             }
+            lastEventCount = events.length;
+          }
 
-            if (status.status === "done" || status.status === "error") {
-              break;
-            }
-          } catch {
-            // file being written, retry
+          if (status.status === "done" || status.status === "error") {
+            break;
           }
         }
 

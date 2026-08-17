@@ -5,7 +5,7 @@ export async function GET() {
   try {
     const stores = await getAllStores();
     return NextResponse.json(stores);
-  } catch {
-    return NextResponse.json([]);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

@@ -1,4 +1,4 @@
-import { list, put, del, getDownloadUrl } from "@vercel/blob";
+import { list, put, del, get } from "@vercel/blob";
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 
@@ -11,6 +11,21 @@ function isVercel(): boolean {
 
 function ensureJobsDir() {
   if (!existsSync(JOBS_DIR)) mkdirSync(JOBS_DIR, { recursive: true });
+}
+
+async function readBlob(url: string): Promise<Record<string, unknown>> {
+  const result = await get(url, { access: "private" });
+  if (!result || !result.stream) throw new Error(`Blob not found: ${url}`);
+  const reader = result.stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let done = false;
+  while (!done) {
+    const r = await reader.read();
+    if (r.value) chunks.push(r.value);
+    done = r.done;
+  }
+  const text = new TextDecoder().decode(Buffer.concat(chunks));
+  return JSON.parse(text);
 }
 
 export async function writeJob(jobId: string, data: Record<string, unknown>): Promise<void> {
@@ -51,9 +66,7 @@ export async function readJobStatus(jobId: string): Promise<Record<string, unkno
   }
   const { blobs } = await list({ prefix: `${BLOB_PREFIX}${jobId}-status.json` });
   if (blobs.length === 0) return null;
-  const downloadUrl = await getDownloadUrl(blobs[0].url);
-  const res = await fetch(downloadUrl);
-  return res.json();
+  return readBlob(blobs[0].url) as Promise<Record<string, unknown> | null>;
 }
 
 export async function getAllJobs(): Promise<Array<{ jobId: string; status: string; storeName?: string; events: Array<{ event: string; data: unknown }> }>> {
@@ -85,22 +98,18 @@ export async function getAllJobs(): Promise<Array<{ jobId: string; status: strin
   const jobs = await Promise.all(
     statusBlobs.map(async (blob) => {
       const jobId = blob.pathname.replace(BLOB_PREFIX, "").replace("-status.json", "");
-      const statusDl = await getDownloadUrl(blob.url);
-      const statusRes = await fetch(statusDl);
-      const status = await statusRes.json();
+      const status = await readBlob(blob.url);
 
       let storeName: string | undefined;
       const jobBlob = blobs.find((b) => b.pathname === `${BLOB_PREFIX}${jobId}.json`);
       if (jobBlob) {
         try {
-          const jobDl = await getDownloadUrl(jobBlob.url);
-          const jobRes = await fetch(jobDl);
-          const job = await jobRes.json();
-          storeName = job.storeName;
+          const job = await readBlob(jobBlob.url);
+          storeName = job.storeName as string;
         } catch {}
       }
 
-      return { jobId, status: status.status, storeName, events: status.events || [] };
+      return { jobId, status: status.status as string, storeName, events: (status.events || []) as Array<{ event: string; data: unknown }> };
     })
   );
 

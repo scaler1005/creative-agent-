@@ -1,4 +1,4 @@
-import { list, put, del, getDownloadUrl } from "@vercel/blob";
+import { list, put, del, get } from "@vercel/blob";
 import { readdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 
@@ -7,6 +7,21 @@ const BLOB_PREFIX = "stores/";
 
 function isVercel(): boolean {
   return !!process.env.BLOB_READ_WRITE_TOKEN || !!process.env.BLOB_STORE_ID;
+}
+
+async function readBlob(url: string): Promise<Record<string, unknown>> {
+  const result = await get(url, { access: "private" });
+  if (!result || !result.stream) throw new Error(`Blob not found: ${url}`);
+  const reader = result.stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let done = false;
+  while (!done) {
+    const r = await reader.read();
+    if (r.value) chunks.push(r.value);
+    done = r.done;
+  }
+  const text = new TextDecoder().decode(Buffer.concat(chunks));
+  return JSON.parse(text);
 }
 
 export async function getAllStores(): Promise<Record<string, unknown>[]> {
@@ -23,11 +38,7 @@ export async function getAllStores(): Promise<Record<string, unknown>[]> {
   if (blobs.length === 0) return [];
 
   const stores = await Promise.all(
-    blobs.map(async (blob) => {
-      const downloadUrl = await getDownloadUrl(blob.url);
-      const res = await fetch(downloadUrl);
-      return res.json();
-    })
+    blobs.map(async (blob) => readBlob(blob.url))
   );
   return stores;
 }
@@ -45,9 +56,7 @@ export async function getStore(storeId: string): Promise<Record<string, unknown>
   const { blobs } = await list({ prefix: `${BLOB_PREFIX}${storeId}.json` });
   if (blobs.length === 0) return null;
 
-  const downloadUrl = await getDownloadUrl(blobs[0].url);
-  const res = await fetch(downloadUrl);
-  return res.json();
+  return readBlob(blobs[0].url);
 }
 
 export async function saveStore(storeId: string, data: Record<string, unknown>): Promise<void> {

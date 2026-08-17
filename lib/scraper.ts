@@ -1,5 +1,3 @@
-import puppeteer from "puppeteer";
-
 export interface ProductInfo {
   name: string;
   price: string;
@@ -37,186 +35,135 @@ async function tryShopifyApi(baseUrl: string): Promise<ProductInfo[] | null> {
   }
 }
 
-const NON_PRODUCT_PATTERNS = [
-  /logo/i, /icon/i, /badge/i, /banner/i, /guarantee/i, /garantie/i,
-  /payment/i, /shipping/i, /trust/i, /seal/i, /arrow/i, /chevron/i,
-  /sprite/i, /placeholder/i, /avatar/i, /flag/i, /social/i,
-  /facebook/i, /instagram/i, /twitter/i, /tiktok/i, /youtube/i,
-  /\.svg$/i, /1x1\.gif/i, /spacer/i, /pixel/i, /tracking/i,
-];
+async function fetchHtml(url: string): Promise<string> {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(15000),
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml",
+    },
+  });
+  return res.text();
+}
 
-function isProductImage(src: string, alt: string, width: number, height: number): boolean {
-  if (width > 0 && width < 100) return false;
-  if (height > 0 && height < 100) return false;
-  const combined = src + " " + alt;
-  return !NON_PRODUCT_PATTERNS.some((p) => p.test(combined));
+function extractMeta(html: string, property: string): string {
+  const re = new RegExp(`<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']*)["']`, "i");
+  const match = html.match(re);
+  if (match) return match[1];
+  const re2 = new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${property}["']`, "i");
+  const match2 = html.match(re2);
+  return match2?.[1] ?? "";
+}
+
+function extractTitle(html: string): string {
+  const match = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+  return match?.[1]?.trim() ?? "Store";
+}
+
+function parseProductsFromHtml(html: string, baseUrl: string): ProductInfo[] {
+  const products: ProductInfo[] = [];
+  const seen = new Set<string>();
+  const origin = new URL(baseUrl).origin;
+
+  const productLinkRe = /<a[^>]+href=["']([^"']*\/products\/[^"'?#]*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+
+  while ((match = productLinkRe.exec(html)) !== null) {
+    const href = match[1].startsWith("http") ? match[1] : `${origin}${match[1]}`;
+    if (seen.has(href)) continue;
+
+    const block = match[2];
+    const imgMatch = block.match(/<img[^>]+(?:src|data-src)=["']([^"']+)["'][^>]*/i);
+    if (!imgMatch) continue;
+
+    let imgSrc = imgMatch[1];
+    if (imgSrc.startsWith("//")) imgSrc = `https:${imgSrc}`;
+    const cleanSrc = imgSrc.split("?")[0];
+
+    if (/logo|icon|badge|banner|\.svg$|1x1|spacer|pixel|tracking/i.test(cleanSrc)) continue;
+
+    const altMatch = imgMatch[0].match(/alt=["']([^"']*)["']/i);
+    const nameFromAlt = altMatch?.[1]?.trim() ?? "";
+
+    const headingMatch = block.match(/<(?:h[2-5]|span|div)[^>]*class=["'][^"']*(?:title|heading|name)[^"']*["'][^>]*>([^<]+)/i);
+    const name = headingMatch?.[1]?.trim() || nameFromAlt || `Product ${products.length + 1}`;
+
+    const priceMatch = block.match(/(?:€|£|\$|CHF)\s*[\d,.]+|[\d,.]+\s*(?:€|£|\$|CHF)/);
+    const price = priceMatch?.[0]?.trim() ?? "";
+
+    seen.add(href);
+    products.push({ name, price, imageUrl: cleanSrc, url: href });
+
+    if (products.length >= 10) break;
+  }
+
+  return products;
+}
+
+function analyzeOffer(products: ProductInfo[], html: string): StoreOffer {
+  const pageText = html.replace(/<[^>]+>/g, " ").substring(0, 8000).toLowerCase();
+
+  const collectionMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+  const collectionName = collectionMatch?.[1]?.trim() ?? "";
+
+  const originalPrices: string[] = [];
+  const salePrices: string[] = [];
+  let isFree = false;
+  let isClosingSale = false;
+
+  for (const p of products) {
+    if (p.originalPrice) originalPrices.push(p.originalPrice);
+    if (p.price) {
+      salePrices.push(p.price);
+      if (/[¥€$£]\s*0([.,]0+)?|free|gratis|0\s*[¥€$£]|CHF\s*0/i.test(p.price)) {
+        isFree = true;
+      }
+    }
+  }
+
+  const closingKeywords = ["closing", "clearance", "final sale", "last chance", "sluiting", "closing down", "everything must go", "alles muss raus", "lagerverkauf", "räumungsverkauf"];
+  isClosingSale = closingKeywords.some((kw) => pageText.includes(kw));
+
+  const discountMatch = pageText.match(/(\d{1,2})\s*%\s*(rabatt|off|korting|discount|reduziert)/i)
+    || pageText.match(/(bis zu|up to|tot)\s*(\d{1,2})\s*%/i);
+
+  let offer = "";
+  if (isFree) {
+    offer = "Everything is FREE — just pay shipping";
+  } else if (discountMatch && isClosingSale) {
+    const pct = discountMatch[1] || discountMatch[2];
+    offer = `Closing sale — up to ${pct}% off`;
+  } else if (isClosingSale) {
+    offer = "Closing sale — massive discounts";
+  } else if (originalPrices.length > 0 && salePrices.length > 0) {
+    offer = `On sale: was ${originalPrices[0]}, now ${salePrices[0]}`;
+  } else if (salePrices.length > 0) {
+    offer = `Starting at ${salePrices[0]}`;
+  }
+
+  return { offer, originalPrices, salePrices, isFree, isClosingSale, collectionName };
 }
 
 export async function scrapeProductPage(
   url: string
 ): Promise<{ products: ProductInfo[]; storeName: string; storeOffer: StoreOffer }> {
-  // Try Shopify API first — most reliable for product data
   const apiProducts = await tryShopifyApi(url);
 
-  const browser = await puppeteer.launch({ headless: true });
-  const page = await browser.newPage();
-  await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+  const html = await fetchHtml(url);
 
-  const data = await page.evaluate((apiProds: ProductInfo[] | null, nonProductPatterns: string[]) => {
-    const storeName =
-      document.querySelector("meta[property='og:site_name']")?.getAttribute("content") ??
-      document.title.split("|").pop()?.trim() ??
-      document.title.split("–").pop()?.trim() ??
-      "Store";
+  const storeName =
+    extractMeta(html, "og:site_name") ||
+    extractTitle(html).split(/[|–—]/).pop()?.trim() ||
+    "Store";
 
-    // If we got products from API, use those but still analyze offer from page
-    let products: Array<{
-      name: string;
-      price: string;
-      originalPrice: string;
-      imageUrl: string;
-      url: string;
-    }> = [];
+  let products: ProductInfo[];
+  if (apiProducts && apiProducts.length > 0) {
+    products = apiProducts;
+  } else {
+    products = parseProductsFromHtml(html, url);
+  }
 
-    if (apiProds && apiProds.length > 0) {
-      products = apiProds.map((p) => ({
-        name: p.name,
-        price: p.price,
-        originalPrice: p.originalPrice ?? "",
-        imageUrl: p.imageUrl,
-        url: p.url,
-      }));
-    } else {
-      // Strategy 1: Shopify product cards — broad selectors
-      const cardSelectors = [
-        ".product-card",
-        "[data-product-card]",
-        ".grid__item .card",
-        ".collection-product-card",
-        ".product-item",
-        ".product-grid-item",
-        ".product-block",
-        ".product-list-item",
-        "li[data-product-id]",
-        ".grid-product",
-        ".productgrid--item",
-        ".product-index",
-      ];
+  const storeOffer = analyzeOffer(products, html);
 
-      let cards: Element[] = [];
-      for (const sel of cardSelectors) {
-        const found = document.querySelectorAll(sel);
-        if (found.length >= 2) {
-          cards = Array.from(found);
-          break;
-        }
-      }
-
-      // Strategy 2: Find repeating link+image patterns (product listings)
-      if (cards.length === 0) {
-        const productLinks = Array.from(document.querySelectorAll("a[href*='/products/']"));
-        const seen = new Set<string>();
-        for (const link of productLinks) {
-          const img = link.querySelector("img");
-          if (!img) continue;
-          const href = (link as HTMLAnchorElement).href;
-          if (seen.has(href)) continue;
-          seen.add(href);
-          cards.push(link);
-        }
-      }
-
-      for (const card of cards) {
-        const imgEl = card.querySelector("img");
-        if (!imgEl) continue;
-
-        const imgSrc = imgEl.src || imgEl.getAttribute("data-src") || imgEl.getAttribute("data-srcset")?.split(" ")[0] || "";
-        if (!imgSrc) continue;
-
-        const w = imgEl.naturalWidth || imgEl.width || 0;
-        const h = imgEl.naturalHeight || imgEl.height || 0;
-        const alt = imgEl.alt || "";
-        const cleanSrc = imgSrc.split("?")[0];
-
-        const patternsToSkip = nonProductPatterns.map((p) => new RegExp(p, "i"));
-        const combined = cleanSrc + " " + alt;
-        if (patternsToSkip.some((p) => p.test(combined))) continue;
-        if (w > 0 && w < 100) continue;
-        if (h > 0 && h < 100) continue;
-
-        const nameEl = card.querySelector("h2, h3, h4, h5, .card__heading, .product-card__title, [data-product-card-title], .product-title, .grid-product__title");
-        const priceEl = card.querySelector(".price-item--sale, .price-item--regular, .price, .product-card__price, .money, [data-price]");
-        const origPriceEl = card.querySelector(".price-item--regular.price-item--last, .price--compare, s, del, .compare-at-price");
-        const linkEl = card.querySelector("a[href*='/products/']") || card.closest("a");
-
-        const name = nameEl?.textContent?.trim() || alt || `Product ${products.length + 1}`;
-
-        const seen = new Set<string>();
-        if (seen.has(cleanSrc)) continue;
-        seen.add(cleanSrc);
-
-        products.push({
-          name,
-          price: priceEl?.textContent?.trim() ?? "",
-          originalPrice: origPriceEl?.textContent?.trim() ?? "",
-          imageUrl: cleanSrc,
-          url: (linkEl as HTMLAnchorElement)?.href ?? "",
-        });
-      }
-    }
-
-    // Analyze store offer from prices and page context
-    const collectionName = document.querySelector("h1, .collection-title, [data-collection-title]")?.textContent?.trim() ?? "";
-    const pageText = document.body.innerText.substring(0, 5000).toLowerCase();
-
-    const originalPrices: string[] = [];
-    const salePrices: string[] = [];
-    let isFree = false;
-    let isClosingSale = false;
-
-    for (const p of products) {
-      if (p.originalPrice) originalPrices.push(p.originalPrice);
-      if (p.price) {
-        salePrices.push(p.price);
-        if (p.price.match(/[¥€$£]\s*0([.,]0+)?|free|gratis|無料|0\s*[¥€$£]|CHF\s*0/i)) {
-          isFree = true;
-        }
-      }
-    }
-
-    const closingKeywords = ["closing", "clearance", "final", "last", "sluiting", "閉店", "closing down", "everything must go", "alles muss raus", "lagerverkauf", "schliessen", "räumungsverkauf"];
-    isClosingSale = closingKeywords.some((kw) => pageText.includes(kw));
-
-    // Detect discount percentage from page text
-    const discountMatch = pageText.match(/(\d{1,2})\s*%\s*(rabatt|off|korting|discount|reduziert)/i)
-      || pageText.match(/(bis zu|up to|tot)\s*(\d{1,2})\s*%/i);
-
-    let offer = "";
-    if (isFree) {
-      offer = "Everything is FREE — just pay shipping";
-    } else if (discountMatch && isClosingSale) {
-      const pct = discountMatch[1] || discountMatch[2];
-      offer = `Closing sale — up to ${pct}% off`;
-    } else if (isClosingSale) {
-      offer = `Closing sale — massive discounts`;
-    } else if (originalPrices.length > 0 && salePrices.length > 0) {
-      offer = `On sale: was ${originalPrices[0]}, now ${salePrices[0]}`;
-    } else if (salePrices.length > 0) {
-      offer = `Starting at ${salePrices[0]}`;
-    }
-
-    const storeOffer: {
-      offer: string;
-      originalPrices: string[];
-      salePrices: string[];
-      isFree: boolean;
-      isClosingSale: boolean;
-      collectionName: string;
-    } = { offer, originalPrices, salePrices, isFree, isClosingSale, collectionName };
-
-    return { products, storeName, storeOffer };
-  }, apiProducts, NON_PRODUCT_PATTERNS.map((p) => p.source));
-
-  await browser.close();
-  return data;
+  return { products, storeName, storeOffer };
 }

@@ -23,9 +23,11 @@ export async function GET(req: Request) {
       maxPollTime: 60000,
     });
 
+    const endpoint = searchParams.get("endpoint") || "flux-pro/kontext/max/text-to-image";
+
     if (mode === "generate") {
       const response = await client.subscribe(
-        "flux-pro/kontext/max/text-to-image",
+        endpoint,
         {
           input: {
             prompt: "A titanium cooking pan on a white background, product photography",

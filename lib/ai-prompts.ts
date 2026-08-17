@@ -74,29 +74,31 @@ Return ONLY a JSON array of exactly 10 objects with these fields:
 
 JSON only, no markdown fences.`;
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 2000,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userPrompt }],
-  });
-
-  const text = response.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-
   try {
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) return parsed.slice(0, 10);
-  } catch {
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[0]).slice(0, 10);
-      } catch {}
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 2000,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userPrompt }],
+    });
+
+    const text = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed.slice(0, 10);
+    } catch {
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        try {
+          return JSON.parse(jsonMatch[0]).slice(0, 10);
+        } catch {}
+      }
     }
-  }
+  } catch {}
 
   return fallbackConcepts(products, storeOffer, funnelStage, creativeType, format, storeLearnings, context);
 }

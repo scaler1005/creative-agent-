@@ -1,4 +1,4 @@
-import { list, put, del } from "@vercel/blob";
+import { list, put, del, get } from "@vercel/blob";
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 
@@ -51,8 +51,9 @@ export async function readJobStatus(jobId: string): Promise<Record<string, unkno
   }
   const { blobs } = await list({ prefix: `${BLOB_PREFIX}${jobId}-status.json` });
   if (blobs.length === 0) return null;
-  const res = await fetch(blobs[0].downloadUrl);
-  return res.json();
+  const result = await get(blobs[0].url);
+  const text = await result.text();
+  return JSON.parse(text);
 }
 
 export async function getAllJobs(): Promise<Array<{ jobId: string; status: string; storeName?: string; events: Array<{ event: string; data: unknown }> }>> {
@@ -84,15 +85,17 @@ export async function getAllJobs(): Promise<Array<{ jobId: string; status: strin
   const jobs = await Promise.all(
     statusBlobs.map(async (blob) => {
       const jobId = blob.pathname.replace(BLOB_PREFIX, "").replace("-status.json", "");
-      const res = await fetch(blob.downloadUrl);
-      const status = await res.json();
+      const statusResult = await get(blob.url);
+      const statusText = await statusResult.text();
+      const status = JSON.parse(statusText);
 
       let storeName: string | undefined;
       const jobBlob = blobs.find((b) => b.pathname === `${BLOB_PREFIX}${jobId}.json`);
       if (jobBlob) {
         try {
-          const jobRes = await fetch(jobBlob.downloadUrl);
-          const job = await jobRes.json();
+          const jobResult = await get(jobBlob.url);
+          const jobText = await jobResult.text();
+          const job = JSON.parse(jobText);
           storeName = job.storeName;
         } catch {}
       }

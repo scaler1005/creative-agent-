@@ -1,4 +1,4 @@
-import { list, put, del } from "@vercel/blob";
+import { list, put, del, get } from "@vercel/blob";
 import { readdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 
@@ -24,8 +24,9 @@ export async function getAllStores(): Promise<Record<string, unknown>[]> {
 
   const stores = await Promise.all(
     blobs.map(async (blob) => {
-      const res = await fetch(blob.downloadUrl);
-      return res.json();
+      const result = await get(blob.url);
+      const text = await result.text();
+      return JSON.parse(text);
     })
   );
   return stores;
@@ -44,8 +45,9 @@ export async function getStore(storeId: string): Promise<Record<string, unknown>
   const { blobs } = await list({ prefix: `${BLOB_PREFIX}${storeId}.json` });
   if (blobs.length === 0) return null;
 
-  const res = await fetch(blobs[0].downloadUrl);
-  return res.json();
+  const result = await get(blobs[0].url);
+  const text = await result.text();
+  return JSON.parse(text);
 }
 
 export async function saveStore(storeId: string, data: Record<string, unknown>): Promise<void> {
@@ -71,7 +73,6 @@ export async function seedFromLocal(): Promise<number> {
 
   for (const f of jsonFiles) {
     const raw = await readFile(path.join(STORES_DIR, f), "utf-8");
-    const data = JSON.parse(raw);
 
     const { blobs } = await list({ prefix: `${BLOB_PREFIX}${f}` });
     for (const blob of blobs) {

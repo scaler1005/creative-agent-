@@ -1,4 +1,4 @@
-import { HiggsfieldClient } from "@higgsfield/client";
+import { createHiggsfieldClient } from "@higgsfield/client/v2";
 
 interface GeneratedImage {
   url: string;
@@ -7,8 +7,8 @@ interface GeneratedImage {
 }
 
 const SIZE_MAP: Record<string, string> = {
-  "1:1": "1536x1536",
-  "9:16": "1152x2048",
+  "1:1": "1:1",
+  "9:16": "9:16",
 };
 
 export async function generateImages(
@@ -23,14 +23,13 @@ export async function generateImages(
     return [];
   }
 
-  const client = new HiggsfieldClient({
-    apiKey,
-    apiSecret,
+  const client = createHiggsfieldClient({
+    credentials: `${apiKey}:${apiSecret}`,
     pollInterval: 3000,
     maxPollTime: 120000,
   });
 
-  const widthAndHeight = SIZE_MAP[format] || "1536x1536";
+  const aspectRatio = SIZE_MAP[format] || "1:1";
   const results: GeneratedImage[] = [];
 
   const batchSize = 3;
@@ -39,25 +38,24 @@ export async function generateImages(
 
     const batchResults = await Promise.allSettled(
       batch.map(async ({ prompt, conceptIndex }) => {
-        const jobSet = await client.generate(
-          "/v1/text2image/soul",
+        const response = await client.subscribe(
+          "flux-pro/kontext/max/text-to-image",
           {
-            prompt,
-            width_and_height: widthAndHeight,
-            quality: "1080p",
-            batch_size: 1,
-          },
-          { withPolling: true }
+            input: {
+              prompt,
+              aspect_ratio: aspectRatio,
+              safety_tolerance: 2,
+            },
+            withPolling: true,
+          }
         );
 
-        for (const job of jobSet.jobs) {
-          if (job.status === "completed" && job.results?.raw?.url) {
-            return {
-              url: job.results.raw.url,
-              prompt,
-              conceptIndex,
-            };
-          }
+        if (response.status === "completed" && response.images?.[0]?.url) {
+          return {
+            url: response.images[0].url,
+            prompt,
+            conceptIndex,
+          };
         }
         return null;
       })
@@ -72,7 +70,6 @@ export async function generateImages(
     onProgress?.(Math.min(i + batchSize, prompts.length), prompts.length);
   }
 
-  client.close();
   return results;
 }
 

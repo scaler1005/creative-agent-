@@ -1,4 +1,4 @@
-import { HiggsfieldClient } from "@higgsfield/client";
+import { createHiggsfieldClient } from "@higgsfield/client/v2";
 import { NextResponse } from "next/server";
 
 export async function GET(req: Request) {
@@ -14,46 +14,37 @@ export async function GET(req: Request) {
   }
 
   const { searchParams } = new URL(req.url);
-  const mode = searchParams.get("mode") || "styles";
+  const mode = searchParams.get("mode") || "generate";
 
   try {
-    const client = new HiggsfieldClient({
-      apiKey,
-      apiSecret,
+    const client = createHiggsfieldClient({
+      credentials: `${apiKey}:${apiSecret}`,
       pollInterval: 3000,
       maxPollTime: 60000,
     });
 
-    if (mode === "styles") {
-      const styles = await client.getSoulStyles();
-      client.close();
-      return NextResponse.json({ success: true, styles });
-    }
-
     if (mode === "generate") {
-      const jobSet = await client.generate(
-        "/v1/text2image/soul",
+      const response = await client.subscribe(
+        "flux-pro/kontext/max/text-to-image",
         {
-          prompt: "A titanium cooking pan on a white background, product photography",
-          width_and_height: "1536x1536",
-          quality: "1080p",
-          batch_size: 1,
-        },
-        { withPolling: true }
+          input: {
+            prompt: "A titanium cooking pan on a white background, product photography",
+            aspect_ratio: "1:1",
+            safety_tolerance: 2,
+          },
+          withPolling: true,
+        }
       );
 
-      const jobs = jobSet.jobs.map((j) => ({
-        id: j.id,
-        status: j.status,
-        results: j.results,
-      }));
-
-      client.close();
-      return NextResponse.json({ success: true, jobSetId: jobSet.id, jobs });
+      return NextResponse.json({
+        success: true,
+        status: response.status,
+        requestId: response.request_id,
+        images: response.images,
+      });
     }
 
-    client.close();
-    return NextResponse.json({ error: "Use ?mode=styles or ?mode=generate" });
+    return NextResponse.json({ error: "Use ?mode=generate" });
   } catch (err: unknown) {
     const error = err as Error & { response?: { status?: number; data?: unknown } };
     return NextResponse.json({
@@ -61,7 +52,6 @@ export async function GET(req: Request) {
       name: error.name,
       responseStatus: error.response?.status,
       responseData: error.response?.data,
-      stack: error.stack?.split("\n").slice(0, 5),
     });
   }
 }

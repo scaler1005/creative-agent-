@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFile, writeFile } from "fs/promises";
-import path from "path";
-
-const STORES_DIR = path.join(process.cwd(), "stores");
+import { getStore, saveStore } from "@/lib/store-data";
 
 interface ParsedAd {
   name: string;
@@ -239,12 +236,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "File en storeId zijn verplicht" }, { status: 400 });
     }
 
-    const storePath = path.join(STORES_DIR, `${storeId}.json`);
-    let storeData;
-    try {
-      const raw = await readFile(storePath, "utf-8");
-      storeData = JSON.parse(raw);
-    } catch {
+    const storeData = await getStore(storeId);
+    if (!storeData) {
       return NextResponse.json({ success: false, error: "Store niet gevonden" }, { status: 404 });
     }
 
@@ -259,40 +252,43 @@ export async function POST(req: NextRequest) {
     let importedCount = 0;
     let winnersCount = 0;
 
+    const adAccount = storeData.adAccount as Record<string, unknown>;
+    const learnings = storeData.learnings as Record<string, unknown>;
+
     if (type === "ad") {
       const ads = parseAdsFromCSV(rows);
-      const { winners, learnings } = analyzeAds(ads);
+      const { winners, learnings: newLearnings } = analyzeAds(ads);
       winnersCount = winners.length;
       importedCount = ads.length;
 
-      storeData.adAccount.ads = ads;
-      storeData.adAccount.lastImport = today;
-      storeData.adAccount.totalSpend = ads.reduce((s: number, a: ParsedAd) => s + a.spend, 0);
-      storeData.adAccount.totalPurchases = ads.reduce((s: number, a: ParsedAd) => s + a.purchases, 0);
+      adAccount.ads = ads;
+      adAccount.lastImport = today;
+      adAccount.totalSpend = ads.reduce((s: number, a: ParsedAd) => s + a.spend, 0);
+      adAccount.totalPurchases = ads.reduce((s: number, a: ParsedAd) => s + a.purchases, 0);
 
-      storeData.learnings.winningPatterns = learnings;
+      learnings.winningPatterns = newLearnings;
     } else {
       const campaigns = parseCampaignsFromCSV(rows);
-      const learnings = analyzeCampaigns(campaigns);
+      const newLearnings = analyzeCampaigns(campaigns);
       importedCount = campaigns.length;
       winnersCount = campaigns.filter((c) => c.profitable).length;
 
-      storeData.adAccount.campaigns = campaigns;
-      storeData.adAccount.lastImport = today;
-      storeData.adAccount.totalSpend = campaigns.reduce((s: number, c: ParsedCampaign) => s + c.spend, 0);
-      storeData.adAccount.totalPurchases = campaigns.reduce((s: number, c: ParsedCampaign) => s + c.purchases, 0);
+      adAccount.campaigns = campaigns;
+      adAccount.lastImport = today;
+      adAccount.totalSpend = campaigns.reduce((s: number, c: ParsedCampaign) => s + c.spend, 0);
+      adAccount.totalPurchases = campaigns.reduce((s: number, c: ParsedCampaign) => s + c.purchases, 0);
 
-      const existingLearnings = storeData.learnings.winningPatterns || [];
-      storeData.learnings.winningPatterns = [...learnings, ...existingLearnings.slice(0, 3)];
+      const existingLearnings = (learnings.winningPatterns as string[]) || [];
+      learnings.winningPatterns = [...newLearnings, ...existingLearnings.slice(0, 3)];
     }
 
-    await writeFile(storePath, JSON.stringify(storeData, null, 2));
+    await saveStore(storeId, storeData);
 
     return NextResponse.json({
       success: true,
       imported: importedCount,
       winners: winnersCount,
-      learnings: storeData.learnings.winningPatterns.length,
+      learnings: (learnings.winningPatterns as string[]).length,
     });
   } catch (err) {
     return NextResponse.json(
